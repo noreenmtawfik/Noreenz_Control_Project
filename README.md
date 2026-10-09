@@ -205,3 +205,8 @@ Planar 2D kinematic models assume infinite road grip and zero lateral slip (alph
 
 ### 3. Deterministic MPC vs Sampling-Based Optimal Control (Nav2 MPPI)
 Deterministic gradient-based solvers like SciPy SLSQP minimize trajectory tracking error by calculating numerical gradients over continuous objective functions and actuator limits. They provide mathematically precise tracking and strict constraint satisfaction, but introduce optimization latency (resulting in conservative speeds and longer lap times, as observed in our 121.80 s benchmark). Conversely, Model Predictive Path Integral (MPPI) control leverages massively parallel Monte Carlo rollouts (often GPU-accelerated) to sample thousands of randomized trajectories simultaneously. MPPI naturally accommodates non-differentiable cost maps, obstacles, and discontinuous penalties without gradient evaluations, offering superior robustness for unstructured navigation at the cost of higher raw compute requirements.
+
+
+## 🎥Milestone 8 - Video Demonstration
+- Watch the full walkthrough and simulation demo: https://drive.google.com/drive/folders/1gmZGxQgs4i2aZCs71jfDhLrLD_PSABim?usp=drive_link
+  
