@@ -132,14 +132,41 @@ class Car(Node):
         # TODO: Milestone 2.2 — Extended Kinematic Bicycle Equations of Motion
         # This simulates the physics of the car moving and turning in the real world.
         # Implement the continuous-time state derivatives based on throttle and steering.
-        pass
+        theta = float(self.x[2])
+        v = float(self.x[3])
+
+        u_throttle = float(self.u[0])
+        delta = float(self.u[1])
+
+        # 1. Kinematics (rear axle reference)
+        x_dot = v * math.cos(theta)
+        y_dot = v * math.sin(theta)
+        theta_dot = (v / self.wheelbase_length) * math.tan(delta)
+
+        # 2. Longitudinal dynamics (propulsion - aerodynamic drag - rolling resistance)
+        a_motor = self.k_a * u_throttle
+        a_drag = self.c_drag * (v ** 2)
+        a_roll = self.c_roll * v if v > 0.0 else 0.0
+
+        v_dot = a_motor - a_drag - a_roll
+
+        self.x_dot = np.array([x_dot, y_dot, theta_dot, v_dot], dtype=np.float64)
 
     def update_x(self):
         """Integrates state forward using discrete Forward Euler numerical integration."""
         # TODO: Milestone 2.3 — Forward Euler Integration & Physical Constraints
         # This moves the simulation forward in time step-by-step.
         # Advance the state numerically and apply realistic constraints like max speed.
-        pass
+
+        """Integrates state forward using discrete Forward Euler numerical integration."""
+        # Forward Euler: x_{k+1} = x_k + x_dot * dt
+        self.x = self.x + self.x_dot * self.dt
+
+        # Heading wrapping to [-pi, pi]
+        self.x[2] = (self.x[2] + math.pi) % (2.0 * math.pi) - math.pi
+
+        # Speed clamping: non-negative and capped at max_speed
+        self.x[3] = float(np.clip(self.x[3], 0.0, self.max_speed))
 
     def update_simulation(self):
         """Timer callback coordinating physics update and telemetry broadcast."""
