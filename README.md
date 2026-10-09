@@ -1,212 +1,207 @@
-# ARL Autonomous Vehicle Control Track
+## Milestone 1 — Topic discovery & Live Plotting
+**What I did:**
+- Launched the base simulation via `ros2 launch bicycle_sim bicycle_sim.launch.py`.
+- Inspected the active ROS 2 computational graph using CLI commands (`ros2 node list`, `ros2 topic list`, `ros2 topic info`, `ros2 interface show`).
+- Verified the structure of key message types: `/state` (`nav_msgs/msg/Odometry`), `/throttle` & `/steer` (`std_msgs/msg/Float32`), and manual teleop commands (`geometry_msgs/msg/Twist`).
+- Configured and validated real-time signal plotting via `rqt_plot` and `PlotJuggler` monitoring `/telemetry/cte/data` and `/telemetry/speed/data`.
 
-**Autotronics Research Lab (ARL) — Ain Shams University**  
-*Course: Autonomous Vehicles & Drive-by-Wire Systems | Individual Project*
+**Key findings:**
+- **Active Nodes:** `/kinematic_bicycle`, `/lap_analyzer`, `/path_gen`, `/robot_state_publisher`, `/rviz2`.
+- **Actuator Topics:**
+  - `/throttle` (`std_msgs/msg/Float32`): normalized throttle/braking in [-1.0, 1.0].
+  - `/steer` (`std_msgs/msg/Float32`): front wheel angle in radians (positive values turn left).
+- **State Feedback:** `/state` (`nav_msgs/msg/Odometry`) broadcasting rear-axle position coordinates (x, y) and velocity (v).
+- **Telemetry Channels:** `/telemetry/cte`, `/telemetry/speed`, `/telemetry/heading_err_deg`, and `/telemetry/lap_time`.
+- **Initial Baseline State:** Signals are static at zero since the vehicle physics integration has not yet been implemented in the bicycle model.
 
-<p align="center">
-  <img src="assets/demo.gif" alt="Autonomous Vehicle Simulation Demo" width="100%" />
-</p>
+**Screenshots:**
+- RViz base layout: `docs/images/m1_rviz_base.png`
+- Live rqt_plot: `docs/images/m1_rqt_plot.png`
+- PlotJuggler interface: `docs/images/m1_plotjuggler.png`
 
----
+**Problems & fixes:**
+- `rqt-plot` package name resolution error on Ubuntu 22.04: Fixed by installing `ros-humble-rqt-plot` and `ros-humble-plotjuggler-ros` via apt.
+- Signals not visible in `rqt_plot`: Expanded window geometry and explicitly subscribed to the inner `.data` field (`/telemetry/cte/data` and `/telemetry/speed/data`).
 
-## 🧠 What Is This Project About?
-
-In this project you will build the control system for a self-driving car in a ROS 2 simulation. The car drives around a racetrack and your job is to make it stay on the path, control its speed, and complete laps as fast and accurately as possible.
-
-You will work through a series of milestones, each building on the last:
-
-1. **Explore the system** — Learn what topics the car publishes and subscribes to.
-2. **Bring the car to life** — Implement the physics equations that describe how the car moves.
-3. **Drive it manually** — Build a keyboard teleoperation node to drive the car yourself.
-4. **Add cruise control** — Implement a PID speed controller so the car holds a steady speed.
-5. **Make it autonomous** — Implement three different steering controllers (Lateral PID, Pure Pursuit, and MPC) so the car drives itself around the track.
-6. **Monitor performance** — Build a lap analyzer that logs lap times, tracking error, and shows live graphs and 3D overlays in RViz.
-7. **Report your results** — Compare your controllers and document your findings.
-
-The car model is realistic: it has velocity as a state (not a direct input), meaning it accelerates and decelerates due to drag and friction — just like a real vehicle.
-
-
-
----
+**Open questions:** None. Ready to proceed to kinematic model equations.
 
 
 
----
+## Milestone 2 — Vehicle Kinematics and Powertrain Resistance
 
-## 🚀 Quickstart
+**What I did:**
+- Implemented continuous-time state derivatives in bicycle_sim/bicycle_sim/bicycle_model.py using the rear-axle extended kinematic bicycle formulation.
+- Added powertrain longitudinal dynamics modeling forward motor acceleration, aerodynamic drag, and rolling resistance.
+- Integrated system states using Forward Euler method with discrete time step dt = 0.1 s.
+- Enforced physical boundary conditions: heading angle wrapping within [-pi, pi] and speed clamping within [0, max_speed].
+- Verified actuator responses via direct /throttle and /steer commands and executed package unit tests.
 
-### 1. Build the Workspace
-```bash
-# Source ROS 2 Humble
-source /opt/ros/humble/setup.bash
+**Equations:**
+- Kinematics:
+  - x_dot = v * cos(theta)
+  - y_dot = v * sin(theta)
+  - theta_dot = (v / L) * tan(delta)
+- Longitudinal Acceleration:
+  - v_dot = (k_a * u_throttle) - (c_drag * v^2) - (c_roll * v)
+- Forward Euler Numerical Integration:
+  - x[k+1] = x[k] + x_dot * dt
+  - y[k+1] = y[k] + y_dot * dt
+  - theta[k+1] = wrap(theta[k] + theta_dot * dt, [-pi, pi])
+  - v[k+1] = clamp(v[k] + v_dot * dt, 0.0, max_speed)
 
-# Install build, simulation, and controller dependencies
-sudo apt update && sudo apt install -y python3-colcon-common-extensions \
-  python3-numpy python3-scipy ros-humble-robot-state-publisher \
-  ros-humble-rviz2 ros-humble-xacro
+**Implementation notes:**
+- Set wheelbase length L = 1.25 m and motor gain k_a = 4.0 m/s^2.
+- Braking commands (u_throttle < 0) decelerate the vehicle but are clamped at 0.0 m/s to prevent reverse movement from a standstill.
 
-# Build the workspace (bicycle_sim, bicycle_control, track_environment)
-cd /path/to/bicycle_gym-main
-colcon build --symlink-install
-source install/setup.bash
-```
+**Screenshots:**
+- terminal output: `docs/images/m2_actuator_test.png`
 
-In every new terminal, source the ROS distribution and built workspace:
+**Test results:**
+- colcon test --packages-select bicycle_sim: Summary: 7 tests, 0 errors, 0 failures, 1 skipped.
 
-```bash
-source /opt/ros/humble/setup.bash
-cd /path/to/bicycle_gym-main
-source install/setup.bash
-```
+**Problems & fixes:** None. Actuator testing confirmed proper forward acceleration and left/right steering deflection.
 
-### 2. Launch Modes
 
-| Mode | Launch Command | Section |
-|---|---|---|
-| **Base Simulation (CLI Testing)** | `ros2 launch bicycle_sim bicycle_sim.launch.py` | Milestones 1 & 2 |
-| **Interactive Keyboard Teleop** | `ros2 launch bicycle_sim bicycle_sim.launch.py controller:=teleop` | Milestones 3 & 4 |
-| **Lateral PID (Reactive)** | `ros2 launch bicycle_sim bicycle_sim.launch.py controller:=lateral_pid` | Milestone 5.2 |
-| **Pure Pursuit (Geometric Preview)**| `ros2 launch bicycle_sim bicycle_sim.launch.py controller:=pure_pursuit` | Milestone 5.3 |
-| **Extended Kinematic MPC (Optimal Preview)** | `ros2 launch bicycle_sim bicycle_sim.launch.py controller:=mpc` | Milestone 5.4 |
+## Milestone 3 — Teleoperation Bridge and Safety Watchdog
 
-For keyboard teleoperation, start the keyboard driver in a second sourced terminal:
+**What I did:**
+- Implemented open-loop teleoperation translation in bicycle_control/bicycle_control/teleop_bridge.py.
+- Mapped user geometry_msgs/msg/Twist commands from /cmd_vel to normalized /throttle (range -1.0 to 1.0) and steering angle /steer in radians.
+- Built a 10 Hz safety watchdog mechanism checking elapsed time since the last velocity message, automatically zeroing commands after a 0.5 s timeout.
+- Verified manual driving and steering response using teleop_twist_keyboard alongside live visualization in RViz.
 
-```bash
-sudo apt install -y ros-humble-teleop-twist-keyboard
-ros2 run teleop_twist_keyboard teleop_twist_keyboard
-```
+**Formulas & Logic:**
+- Linear Velocity to Throttle:
+  - u_throttle = clamp(v_cmd / v_max, -1.0, 1.0)
+- Angular Velocity to Steering Angle:
+  - delta = clamp((omega_cmd / omega_max) * delta_max, -delta_max, delta_max)
+- Watchdog Condition:
+  - if (t_now - t_last_cmd) > 0.5 s -> u_throttle = 0.0, delta = 0.0
 
-To request closed-loop cruise control in teleoperation mode:
+**Screenshots:**
+- RViz Manual Teleoperation Run: docs/images/m3_teleop_rviz.png
 
-```bash
-ros2 launch bicycle_sim bicycle_sim.launch.py controller:=teleop use_cruise_control:=true
-```
+**Problems & fixes:** None. Vehicle stops gracefully when keyboard commands cease due to the auto-zero watchdog.
 
-The launch file also supports `rviz:=false` and `analyzer:=false` to disable those nodes. For example:
+## Milestone 4 — Longitudinal Cruise Control (PID Speed Controller)
 
-```bash
-ros2 launch bicycle_sim bicycle_sim.launch.py controller:=pure_pursuit rviz:=false
-```
+**What I did:**
+- Implemented a discrete-time PID longitudinal controller in `bicycle_control/bicycle_control/longitudinal_pid.py` to regulate vehicle forward speed.
+- Incorporated anti-windup clamping on the integrator state to prevent severe speed overshoots caused by drag and rolling resistance latency.
+- Clamped actuator output within the valid throttle and brake limits [-1.0, 1.0].
+- Integrated the speed regulator into `teleop_bridge.py` under the closed-loop cruise control mode (`use_cruise_control:=true`), subscribing to forward velocity from `/state`.
+- Validated step response behavior using PlotJuggler and captured speed tracking performance under a 5.0 m/s command.
 
-### 3. Inspecting the ROS Graph
+**Formulas & Logic:**
+- Speed Error:
+  - e_v = v_target - v_current
+- Proportional Term:
+  - P = Kp * e_v
+- Integral Term with Anti-Windup Clamping:
+  - integral = clamp(integral + e_v * dt, -integral_limit, integral_limit)
+  - I = Ki * integral
+- Derivative Term:
+  - D = Kd * ((e_v - prev_error) / dt)
+- Control Output:
+  - u_raw = P + I + D
+  - u_throttle = clamp(u_raw, -max_brake, max_throttle)
 
-Run these commands from a second sourced terminal while the simulation is running:
+**Screenshots:**
+- Cruise Control Step Response & RViz Run: `docs/images/m4_cruise_speed_plot1.png` , `docs/images/m4_cruise_speed_plot2.png`
 
-```bash
-ros2 node list
-ros2 topic list
-ros2 topic info /state
-ros2 topic info /throttle
-ros2 topic info /steer
-ros2 interface show nav_msgs/msg/Odometry
-ros2 interface show std_msgs/msg/Float32
-ros2 interface show geometry_msgs/msg/Twist
-ros2 topic echo /state
-```
+**Problems & fixes:**
+- Problem: Integrator could drift and wind up when accelerating against aerodynamic drag.
+- Fix: Bounded integrator accumulation between -2.0 and 2.0 via `np.clip`.
 
-### 4. Direct Actuator Testing
 
-With the base simulation running, send actuator commands from another sourced terminal. Throttle/brake uses `[-1.0, 1.0]`; steering is in radians, with positive values turning left.
+## Milestone 5 – Autonomous Trajectory Tracking & Closed-Loop Control
 
-```bash
-ros2 topic pub --once /throttle std_msgs/msg/Float32 "{data: 0.5}"
-ros2 topic pub --once /steer std_msgs/msg/Float32 "{data: 0.30}"
-ros2 topic pub --once /throttle std_msgs/msg/Float32 "{data: -1.0}"
-```
+**What I did:**
+- Implemented a complete autonomous tracking suite comprising curvature-limited velocity profiling, lateral PID, adaptive Pure Pursuit, and kinematic MPC.
+- Formulated path projection logic onto Frenet coordinates to evaluate real-time orthogonal Cross-Track Error (CTE) and heading error relative to centerline waypoints.
+- Built `lap_analyzer.py` as an independent observer node broadcasting plottable telemetry signals, dynamic RViz error whiskers, and a floating 3D HUD scoreboard.
+- Benchmarked all controllers across full laps on the 528.20 m circuit to evaluate tracking precision, lap timing, and actuator stability.
 
-### 5. Real-Time Telemetry & Graphing
-```bash
-# Install plotting and telemetry visualization tools
-sudo apt update && sudo apt install -y ros-humble-plotjuggler-ros rqt-plot
+**Formulas & Logic:**
+- Curvature-Constrained Speed Profiling:
+  - kappa = 2 * sin(delta_psi) / chord_length
+  - v_ref = clamp(sqrt(a_lat_max / abs(kappa)), v_min, v_max)
+- Lateral PID Steering Law:
+  - delta = - clamp(Kp * e_lat + Ki * integral(e_lat) + Kd * derivative(e_lat) + Kyaw * e_yaw, -max_steer, max_steer)
+- Adaptive Pure Pursuit Geometry:
+  - Ld = clamp(kv * v + l_min, l_min, l_max)
+  - y_local = -sin(yaw) * (x_target - x) + cos(yaw) * (y_target - y)
+  - delta = clamp(atan(2 * L * y_local / (Ld^2)), -max_steer, max_steer)
+- Kinematic MPC Optimization:
+  - State: x = [x, y, yaw, v], Controls: u = [delta_k, a_k]
+  - Cost: J = sum(w_lat * e_lat^2 + w_yaw * e_yaw^2 + w_v * e_v^2 + w_dsteer * delta_rate^2 + w_accel * a^2)
+  - Warm-Start Shift: u_init = [u_1, u_2, ..., u_N-1, u_N-1] shifted forward by 2 indices per time step.
 
-# Inspect live signals in rqt_plot:
-ros2 run rqt_plot rqt_plot /telemetry/cte /telemetry/speed
+**Screenshots:**
+- Lateral PID Lap Tracking: docs/images/m5_pid_lap.png
+- Lateral PID Telemetry & Lap Stats: docs/images/m5_pid_lap_stats.png
+- Pure Pursuit Lap Tracking: docs/images/m5_pure_pursuit_lap.png
+- Pure Pursuit Telemetry & Lap Stats: docs/images/m5_pure_pursuit_lap_stats.png
+- Kinematic MPC Lap Tracking: docs/images/m5_mpc_lap.png
+- Kinematic MPC Telemetry & Lap Stats: docs/images/m5_mpc_lap_stats.png
 
-# Or launch PlotJuggler for multi-topic time-series analysis:
-ros2 run plotjuggler plotjuggler
-```
+**Problems & fixes:** 
+- Excessive integral windup on hairpin exits during lateral PID testing was resolved by implementing an error deadband window around the integrator.
+- SLSQP solver latency in MPC was eliminated by feeding a 2-index shifted warm-start vector from the previous solution horizon.
 
-Some telemetry topics are only available after the corresponding analyzer work is complete.
 
----
+## Milestone 6 – Synthesis & Free Exploration
 
-## 🎯 Milestones at a Glance
+**What I did:**
+- Explored the extension of 2D planar kinematic bicycle models into 4-wheel Ackermann multi-body kinematics, 3D physics engines (Gazebo / MVSim), and stochastic predictive controllers (Nav2 MPPI).
 
-- **Milestone 1**: Topic Discovery, Graph Inspection & Telemetry Plotting (`ros2 topic list / info`, `rqt_plot`, `plotjuggler`)
-- **Milestone 2**: Extended Kinematic Bicycle Model & Euler Integration (`src/bicycle_sim/bicycle_sim/bicycle_model.py`)
-- **Milestone 3**: Teleoperation Bridge & Open-Loop Driving (`src/bicycle_control/bicycle_control/teleop_bridge.py`)
-- **Milestone 4**: Low-Level Powertrain Cruise Control (`src/bicycle_control/bicycle_control/longitudinal_pid.py`)
-- **Milestone 5**: Autonomous Path Tracking — It's Time to Get the Car to Drive Autonomously!
-  - **5.1**: High-Level Velocity Profiler & Path Curvature (`src/bicycle_control/bicycle_control/velocity_profiler.py`)
-  - **5.2**: Steer Using Reactive Feedback (`src/bicycle_control/bicycle_control/lateral_pid.py`)
-  - **5.3**: Steer Using Geometric Preview (`src/bicycle_control/bicycle_control/pure_pursuit.py`)
-  - **5.4**: Steer Using Constrained Optimal Preview (Extended Kinematic MPC) (`src/bicycle_control/bicycle_control/mpc.py`)
-  - **5.5**: Real-Time Telemetry, Graphing & RViz Dashboard Engineering (`src/track_environment/track_environment/lap_analyzer.py`)
-- **Milestone 6**: Free Exploration & Reference Resources (Ackermann Kinematics, 3D Simulation, Nav2 MPPI)
-- **Milestone 7**: Deliverable 1 — Repository Documentation (`README.md` Benchmark Report)
-- **Milestone 8**: Deliverable 2 — Technical Video Walkthrough (3–5 Minute Demo)
+**Key Takeaways:**
+- 4-Wheel Ackermann Kinematics: In physical vehicles, inner and outer wheels follow different turning radii (R - W/2 vs R + W/2) during cornering; Ackermann geometry adjusts steering angles dynamically to prevent tire scrub and tread wear.
+- 2D vs 3D Simulation: 2D planar models assume infinite grip and zero tire sideslip, making them fast for real-time control; 3D simulators model Pacejka tire curves, suspension travel, and dynamic load transfers.
+- Deterministic MPC vs Nav2 MPPI: SciPy SLSQP MPC solves an analytical gradient problem over smooth constraints; MPPI generates thousands of GPU-parallelized Monte Carlo rollouts, handling non-differentiable cost maps and obstacle barriers without gradients.
 
----
-## Milestone 6: Free Exploration & Reference Resources
 
-To connect your work in this lab to industrial autonomous vehicle systems, modern simulators, and production ROS 2 frameworks, explore the following organized learning resources. These materials illustrate how the 2D planar kinematic bicycle model extends into multi-body dynamics, 3D physics engines, and advanced sampling-based predictive control.
+## Milestone 7 – Controller Benchmarking & Leaderboard
 
----
+**What I did:**
+- Benchmarked all three steering control algorithms (Lateral PID, Adaptive Pure Pursuit, and Kinematic MPC) on the full 528.20 m centerline track.
+- Captured full lap metrics through the custom lap analyzer node, logging best lap time, peak velocity, mean cross-track error, maximum dynamic deviation, and RMS tracking error.
+- Verified tracking telemetry live through RViz 3D HUD markers and plotted error whiskers.
 
-### 1. Four-Wheel Ackermann Kinematics & `ros2_control`
-*Explore multi-body steering geometry and industrial ROS 2 controller architectures.*
+**Leaderboard Results:**
+- Pure Pursuit achieved the fastest lap time (68.89 s) with superior geometric tracking (Mean CTE: 0.035 m, Max CTE: 0.367 m, RMS: 0.059 m).
+- Lateral PID achieved a 78.86 s lap time with a peak speed of 7.65 m/s, but suffered from significant corner overshoot on hairpins (Max CTE: 3.119 m, RMS: 0.627 m).
+- Kinematic MPC achieved highly stable tracking (Mean CTE: 0.074 m, Max CTE: 0.355 m, RMS: 0.099 m), but recorded a slower lap time (121.80 s) due to conservative acceleration optimization and solver computation overhead.
 
-In a physical 4-wheel vehicle navigating a turn, the inside front wheel must turn sharper than the outside wheel because it follows a smaller turning radius ($R - W/2$ vs $R + W/2$). Forcing both wheels to the same angle causes tire scrub, tread wear, and energy loss.
+**Screenshots:**
+- Lateral PID Lap Stats: docs/images/m5_pid_lap_stats.png
+- Pure Pursuit Lap Stats: docs/images/m5_pure_pursuit_lap_stats.png
+- Kinematic MPC Lap Stats: docs/images/m5_mpc_lap_stats.png
 
-$$\tan\delta_{inner} = \frac{L}{R - \frac{W}{2}}, \quad \tan\delta_{outer} = \frac{L}{R + \frac{W}{2}}$$
+**Problems & fixes:**
+- Live HUD text and lap summary buffers required resetting between laps to prevent accumulating stale CTE data across consecutive runs.
 
-#### Curated Resources:
-- [ROS 2 Control Mobile Robot Kinematics Guide](https://control.ros.org/humble/doc/ros2_controllers/doc/mobile_robot_kinematics.html) — Guide on modeling 4-wheel kinematics and visualizing full car models instead of simplified bicycle models.
-- [ROS 2 Steering Controllers Library](https://control.ros.org/kilted/doc/ros2_controllers/steering_controllers_library/doc/userdoc.html) — Official documentation for Ackermann and bicycle steering controllers in `ros2_control`.
-- [ros2_control_demos Example 11: Steered Wheel Base](https://control.ros.org/humble/doc/ros2_control_demos/example_11/doc/userdoc.html) — Industrial demonstration of steered-wheel bases and hardware interfaces.
-- [ros2_control_demos Repository](https://github.com/ros-controls/ros2_control_demos) — Comprehensive reference suite for `ros2_control` implementations.
-- [ROS 2 Controllers Official Repository](https://github.com/ros-controls/ros2_controllers/tree/master) — Upstream implementations of vehicle and chassis controllers.
-- [Four-Wheel AMR Reference Implementation](https://github.com/abubakar-mughal97/four_wheel_amr) — 4-wheel mobile robot package with Ackermann steering.
-
----
-
-### 2. Modern 3D Simulation Environments (Gazebo & MVSim)
-*Bridge the gap between 2D planar kinematics and full 3D physics engines with tire friction dynamics.*
-
-While kinematic models assume zero tire slip, physical vehicles experience tire deflection and friction saturation (Pacejka Magic Formula). 3D physics engines simulate suspension compliance, tire contact patches, sensor noise, and terrain.
-
-#### Curated Resources:
-- [Ackermann Vehicle in Modern Gazebo (Gz-Sim) & ROS 2](https://github.com/alitekes1/ackermann-vehicle-gzsim-ros2) ([Main Branch](https://github.com/alitekes1/ackermann-vehicle-gzsim-ros2/tree/main)) — Autonomous Ackermann vehicle simulation using modern Gazebo (Gz-Sim / Ignition) and ROS 2.
-- [Classic Gazebo Ackermann Simulation](https://github.com/lucasmazzetto/gazebo_ackermann_steering_vehicle) — Classic Gazebo simulation showcasing physical Ackermann steering linkages.
-- [Ackermann Autonomous Car Simulation](https://github.com/armando-genis/Ackermann-Autonomous-Car-Simulation) — Autonomous driving stack with Ackermann kinematics in simulation.
-- [MVSim — Multi-Vehicle Simulator for ROS 2 Humble](https://docs.ros.org/en/humble/Tutorials/Advanced/Simulators/MVSim/Simulation-MVSim.html) — Lightweight, fast multi-vehicle dynamic simulator tailored for mobile robots and autonomous vehicles.
-
----
-
-### 3. Stochastic Sampling-Based Predictive Control (Nav2 MPPI)
-*Explore model predictive path integral control for non-linear vehicle systems.*
-
-Model Predictive Path Integral (MPPI) control is an advanced algorithm that generates thousands of randomized candidate trajectories in parallel (using GPU or multi-core CPU) and averages them using path integral weighting to produce optimal controls without needing gradient-based solvers.
-
-#### Curated Resources:
-- [Nav2 MPPI Controller](https://index.ros.org/p/nav2_mppi_controller/) — Production real-time MPPI controller package in the ROS 2 Navigation stack with dynamic obstacle avoidance and customizable cost functions.
-
----
-
-### 💡 Synthesis Task for Your Report:
-In your `README.md` report, synthesize your takeaways from exploring these organized resources:
-1. **Kinematics vs Multi-Body**: How 4-wheel Ackermann kinematics accounts for differing inner and outer wheel turning radii ($\delta_{inner}$ vs $\delta_{outer}$), and how this is modeled in `ros2_control`.
-2. **2D vs 3D Simulation**: The computational and modeling trade-offs between lightweight 2D kinematic simulation and full 3D physics engines (Gazebo / MVSim).
-3. **Deterministic vs Sampling Control**: How modern sampling-based controllers (Nav2 MPPI) differ in flexibility, obstacle handling, and compute requirements compared to deterministic optimization (MPC).
-
----
 ## 🏆 Telemetry Benchmark Leaderboard
-
-*(To be completed by the student as part of Milestone 7)*
 
 | Controller Mode | Best Lap Time (s) | Top Speed (m/s) | Mean CTE (m) | Max CTE (m) | RMS CTE (m) | Laps Completed / Status |
 |---|---|---|---|---|---|---|
-| **Manual Teleoperation** | — | — | — | — | — | — |
-| **Lateral PID (Reactive)** | — | — | — | — | — | — |
-| **Pure Pursuit (Preview)** | — | — | — | — | — | — |
-| **Extended Kinematic MPC (Optimal)** | — | — | — | — | — | — |
+| **Lateral PID (Reactive)** | 78.86 | 7.65 | 0.443 | 3.119 | 0.627 | 2 Laps / Fast, Severe Corner Overshoot |
+| **Pure Pursuit (Preview)** | 68.89 | 7.66 | 0.035 | 0.367 | 0.059 | 2 Laps / Fastest & High Geometry Accuracy |
+| **Extended Kinematic MPC (Optimal)** | 121.80 | 3.94 | 0.074 | 0.355 | 0.099 | 2 Laps / Conservative Throttle, Smooth & Optimal Tracking |
+
+---
+
+## 💡 Synthesis & Architectural Discussion
+
+### 1. Kinematics vs Multi-Body (Ackermann Dynamics)
+In a physical four-wheel vehicle navigating a turn, the inner and outer wheels follow concentric circles with different turning radii (R - W/2 vs R + W/2). Steering both wheels at the exact same angle forces lateral tire scrub, accelerating tire wear and degrading tracking performance. Ackermann steering geometry enforces:
+- tan(delta_inner) = L / (R - W / 2)
+- tan(delta_outer) = L / (R + W / 2)
+
+In production frameworks like `ros2_control`, this multi-body joint relationship is parameterized through kinematic hardware interfaces and multi-joint transmission controllers rather than a single rigid bicycle assumption.
+
+### 2. 2D Planar Simulation vs 3D Multi-Body Engines (Gazebo / MVSim)
+Planar 2D kinematic models assume infinite road grip and zero lateral slip (alpha = 0), neglecting body roll, pitch, suspension travel, and dynamic tire load shifts. While computationally minimal and ideal for real-time 10 Hz MPC preview optimization, they cannot capture vehicle behavior near the friction limits. In contrast, 3D physics engines (such as Gazebo or MVSim) simulate Pacejka Magic Formula tire friction curves, suspension compliance, track surface elevations, and sensor noise, capturing understeer, oversteer, and lateral sliding phenomena.
+
+### 3. Deterministic MPC vs Sampling-Based Optimal Control (Nav2 MPPI)
+Deterministic gradient-based solvers like SciPy SLSQP minimize trajectory tracking error by calculating numerical gradients over continuous objective functions and actuator limits. They provide mathematically precise tracking and strict constraint satisfaction, but introduce optimization latency (resulting in conservative speeds and longer lap times, as observed in our 121.80 s benchmark). Conversely, Model Predictive Path Integral (MPPI) control leverages massively parallel Monte Carlo rollouts (often GPU-accelerated) to sample thousands of randomized trajectories simultaneously. MPPI naturally accommodates non-differentiable cost maps, obstacles, and discontinuous penalties without gradient evaluations, offering superior robustness for unstructured navigation at the cost of higher raw compute requirements.
